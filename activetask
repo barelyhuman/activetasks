@@ -1,0 +1,114 @@
+#!/usr/bin/env lua
+
+local lummander = require("lummander")
+local json = require("lunajson")
+local colors = require("ansicolors")
+local taskList = json.decode("{\"active\":{},\"tasks\":[]}")
+
+local storage_path = os.getenv("HOME") .. "/.activetask/"
+
+local storage_file = storage_path .. "tasks.json"
+
+os.execute("mkdir -p " .. storage_path)
+
+local function sync_from_memory()
+	local file = io.open(storage_file, "w")
+	local serialized = json.encode(taskList)
+	if not file then return nil end
+	file:write(serialized)
+	file:close()
+end
+
+local function sync_from_file()
+	local file = io.open(storage_file, "r")
+	if not file then return nil end
+	local jsonString = file:read("*a")
+	if #jsonString > 0 then
+		taskList = json.decode(jsonString)
+	else
+		taskList = json.decode('{"active":{},"tasks":[]}')
+	end
+	file:close()
+end
+
+local function show_active(parsed, command, app)
+	sync_from_file()
+	if taskList.active and taskList.active.id  then
+		print(taskList.active.id, taskList.active.task, taskList.active.completed)
+	else
+		print("No Active task right now")
+	end
+end
+
+local cli = lummander.new({
+	title = "activetask",
+	tag = "activetask",
+	description = "Single task tasklist",
+	version = "0.0.0",
+	author = "reaper<ahoy@barelyhuman.dev>",
+	theme = "acid",
+	flag_prevent_help = false,
+})
+
+cli:command("init", "Initialize the files"):action(function(parsed, command, app)
+	sync_from_memory()
+end)
+
+cli:command("active", "Show the current active task"):action(show_active)
+
+cli:command("list", "List all tasks"):action(function(parsed, command, app)
+	sync_from_file()
+	for _, v in pairs(taskList.tasks) do
+		print(v.id, v.task, v.completed)
+	end
+end)
+
+cli:command("add", "add a new task to the tasklist"):action(function(parsed, command, app)
+	sync_from_file()
+	print(colors("%{dim}Type your new task:%{reset}"))
+	local newTask = io.read() 
+	local task = {
+		id = #taskList.tasks + 1,
+		task = newTask,
+		completed = false,
+	}
+	table.insert(taskList.tasks, task)
+	sync_from_memory()
+end)
+
+cli:command("delete <id>", "delete the selected id"):action(function(parsed, command, app)
+	sync_from_file()
+	for k, v in pairs(taskList.tasks) do
+		if tonumber(v.id) == tonumber(parsed.id) then
+			taskList.tasks[k] = nil
+			print(colors("%{red}Deleted %{reset} task " .. parsed.id .. "%{reset}"))
+		end
+	end
+
+	if taskList.active and tonumber(taskList.active.id) == tonumber(parsed.id) then
+		taskList.active = {}
+	end
+
+	sync_from_memory()
+end)
+
+
+cli:command("clear", "clear the task list"):action(function(parsed, command, app)
+	sync_from_file()
+	taskList.tasks = {}
+	taskList.active = {}
+	sync_from_memory()
+end)
+
+cli:command("set-active <id>", "set the given id as active"):action(function(parsed, command, app)
+	sync_from_file()
+	for k, v in pairs(taskList.tasks) do
+		if tonumber(v.id) == tonumber(parsed.id) then
+			taskList.active = v
+			print(colors("%{green}Set %{reset}" .. parsed.id .. "%{reset}"))
+		end
+	end
+	sync_from_memory()
+end)
+
+cli:parse(arg)
